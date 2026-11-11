@@ -26,6 +26,17 @@ db = Database()
 
 async def connect_to_database():
     try:
+        # Ensure reliable DNS resolution for MongoDB Atlas SRV records
+        try:
+            import dns.resolver
+            default_res = dns.resolver.get_default_resolver()
+            if default_res:
+                default_res.nameservers = ['8.8.8.8', '1.1.1.1'] + [ns for ns in default_res.nameservers if ns not in ('8.8.8.8', '1.1.1.1')]
+                default_res.timeout = 4.0
+                default_res.lifetime = 6.0
+        except Exception:
+            pass
+
         # If connecting to localhost, do a quick non-blocking socket check first
         if not settings.MONGODB_URI or "localhost" in settings.MONGODB_URI or "127.0.0.1" in settings.MONGODB_URI:
             import socket
@@ -40,8 +51,8 @@ async def connect_to_database():
         logger.info(f"Connecting to MongoDB Atlas at: {masked_uri}")
         
         motor_kwargs = {
-            "serverSelectionTimeoutMS": 60000,
-            "connectTimeoutMS": 60000,
+            "serverSelectionTimeoutMS": 5000,
+            "connectTimeoutMS": 5000,
         }
         try:
             import certifi
@@ -54,7 +65,7 @@ async def connect_to_database():
             **motor_kwargs
         )
         import asyncio
-        await asyncio.wait_for(db.client.admin.command('ping'), timeout=60.0)
+        await asyncio.wait_for(db.client.admin.command('ping'), timeout=7.0)
         db.db = db.client[settings.DATABASE_NAME]
         db.fs = AsyncIOMotorGridFSBucket(db.db)
         db.is_connected = True
@@ -64,10 +75,10 @@ async def connect_to_database():
         await create_indexes()
     except Exception as e:
         db.is_connected = False
-        logger.info(
-            f"MongoDB connection notice ({str(e)}). "
-            "Using in-memory persistent fallback store for development/testing. "
-            "Set MONGODB_URI in backend/.env to connect to your live MongoDB Atlas cluster."
+        err_msg = str(e) if str(e) else type(e).__name__
+        logger.warning(
+            f"MongoDB Atlas connection notice: {err_msg}. "
+            "Using in-memory persistent store. If using MongoDB Atlas, ensure your current IP address is added to the IP Access List in Atlas Network Access."
         )
 
 async def close_database_connection():
